@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"time"
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/projectdiscovery/subfinder/v2/pkg/subscraping"
@@ -49,7 +50,7 @@ func (s *Source) Run(ctx context.Context, domain string, session *subscraping.Se
 		for currentPage := 1; currentPage <= pages; currentPage++ {
 			// hunter api doc https://hunter.qianxin.com/home/helpCenter?r=5-1-2
 			qbase64 := base64.URLEncoding.EncodeToString([]byte(fmt.Sprintf("domain=\"%s\"", domain)))
-			resp, err := session.SimpleGet(ctx, fmt.Sprintf("https://hunter.qianxin.com/openApi/search?api-key=%s&search=%s&page=1&page_size=100&is_web=3", randomApiKey, qbase64))
+			resp, err := session.SimpleGet(ctx, fmt.Sprintf("https://hunter.qianxin.com/openApi/search?api-key=%s&search=%s&page=%v&page_size=100&is_web=3", randomApiKey, qbase64, currentPage))
 			if err != nil && resp == nil {
 				results <- subscraping.Result{Source: s.Name(), Type: subscraping.Error, Error: err}
 				session.DiscardHTTPResponse(resp)
@@ -76,7 +77,12 @@ func (s *Source) Run(ctx context.Context, domain string, session *subscraping.Se
 					results <- subscraping.Result{Source: s.Name(), Type: subscraping.Subdomain, Value: subdomain}
 				}
 			}
-			pages = int(response.Data.Total/1000) + 1
+			pages = int(response.Data.Total/100) + 1
+			// 留一点
+			if pages > 10 {
+				pages = 10
+			}
+			time.Sleep(2 * time.Second)
 		}
 	}()
 
