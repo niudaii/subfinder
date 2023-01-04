@@ -78,10 +78,6 @@ func (s *Source) Run(ctx context.Context, domain string, session *subscraping.Se
 				}
 			}
 			pages = int(response.Data.Total/100) + 1
-			// 留一点
-			if pages > 10 {
-				pages = 10
-			}
 			time.Sleep(2 * time.Second)
 		}
 	}()
