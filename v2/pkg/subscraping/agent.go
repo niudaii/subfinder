@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -24,6 +25,9 @@ func NewSession(domain string, proxy string, rateLimit, timeout int) (*Session, 
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: true,
 		},
+		Dial: (&net.Dialer{
+			Timeout: time.Duration(timeout) * time.Second,
+		}).Dial,
 	}
 
 	// Add proxy
@@ -31,7 +35,7 @@ func NewSession(domain string, proxy string, rateLimit, timeout int) (*Session, 
 		proxyURL, _ := url.Parse(proxy)
 		if proxyURL == nil {
 			// Log warning but continue anyway
-			gologger.Warning().Msgf("Invalid proxy provided: '%s'", proxy)
+			gologger.Warning().Msgf("Invalid proxy provided: %s", proxy)
 		} else {
 			Transport.Proxy = http.ProxyURL(proxyURL)
 		}
@@ -46,7 +50,7 @@ func NewSession(domain string, proxy string, rateLimit, timeout int) (*Session, 
 
 	// Initiate rate limit instance
 	if rateLimit > 0 {
-		session.RateLimiter = ratelimit.New(context.Background(), int64(rateLimit), time.Second)
+		session.RateLimiter = ratelimit.New(context.Background(), uint(rateLimit), time.Second)
 	} else {
 		session.RateLimiter = ratelimit.NewUnlimited(context.Background())
 	}
@@ -131,9 +135,9 @@ func httpRequestWrapper(client *http.Client, request *http.Request) (*http.Respo
 		gologger.Debug().MsgFunc(func() string {
 			buffer := new(bytes.Buffer)
 			_, _ = buffer.ReadFrom(response.Body)
-			return fmt.Sprintf("Response for failed request against '%s':\n%s", requestURL, buffer.String())
+			return fmt.Sprintf("Response for failed request against %s:\n%s", requestURL, buffer.String())
 		})
-		return response, fmt.Errorf("unexpected status code %d received from '%s'", response.StatusCode, requestURL)
+		return response, fmt.Errorf("unexpected status code %d received from %s", response.StatusCode, requestURL)
 	}
 	return response, nil
 }

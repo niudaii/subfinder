@@ -76,6 +76,10 @@ RATE-LIMIT:
   -rl, -rate-limit int  maximum number of http requests to send per second
   -t int                number of concurrent goroutines for resolving (-active only) (default 10)
 
+UPDATE:
+   -up, -update                 update subfinder to latest version
+   -duc, -disable-update-check  disable automatic subfinder update check
+
 OUTPUT:
   -o, -output string       file to write output to
   -oJ, -json               write output in JSONL(ines) format
@@ -106,7 +110,7 @@ OPTIMIZATION:
 
 # Installation
 
-`subfinder` requires **go1.18** to install successfully. Run the following command to install the latest version:
+`subfinder` requires **go1.19** to install successfully. Run the following command to install the latest version:
 
 ```sh
 go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest

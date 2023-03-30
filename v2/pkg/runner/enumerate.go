@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"io"
 	"strings"
 	"sync"
@@ -9,15 +10,21 @@ import (
 	"github.com/hako/durafmt"
 
 	"github.com/projectdiscovery/gologger"
+
 	"github.com/projectdiscovery/subfinder/v2/pkg/resolve"
 	"github.com/projectdiscovery/subfinder/v2/pkg/subscraping"
 )
 
 const maxNumCount = 2
 
-// EnumerateSingleDomain performs subdomain enumeration against a single domain
+// EnumerateSingleDomain wraps EnumerateSingleDomainWithCtx with an empty context
 func (r *Runner) EnumerateSingleDomain(domain string, writers []io.Writer) error {
-	gologger.Info().Msgf("Enumerating subdomains for '%s'\n", domain)
+	return r.EnumerateSingleDomainWithCtx(context.Background(), domain, writers)
+}
+
+// EnumerateSingleDomainWithCtx performs subdomain enumeration against a single domain
+func (r *Runner) EnumerateSingleDomainWithCtx(ctx context.Context, domain string, writers []io.Writer) error {
+	gologger.Info().Msgf("Enumerating subdomains for %s\n", domain)
 
 	// Check if the user has asked to remove wildcards explicitly.
 	// If yes, create the resolution pool and get the wildcards for the current domain
@@ -27,13 +34,13 @@ func (r *Runner) EnumerateSingleDomain(domain string, writers []io.Writer) error
 		err := resolutionPool.InitWildcards(domain)
 		if err != nil {
 			// Log the error but don't quit.
-			gologger.Warning().Msgf("Could not get wildcards for domain '%s': %s\n", domain, err)
+			gologger.Warning().Msgf("Could not get wildcards for domain %s: %s\n", domain, err)
 		}
 	}
 
 	// Run the passive subdomain enumeration
 	now := time.Now()
-	passiveResults := r.passiveAgent.EnumerateSubdomains(domain, r.options.Proxy, r.options.RateLimit, r.options.Timeout, time.Duration(r.options.MaxEnumerationTime)*time.Minute)
+	passiveResults := r.passiveAgent.EnumerateSubdomainsWithCtx(ctx, domain, r.options.Proxy, r.options.RateLimit, r.options.Timeout, time.Duration(r.options.MaxEnumerationTime)*time.Minute)
 
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
@@ -46,7 +53,7 @@ func (r *Runner) EnumerateSingleDomain(domain string, writers []io.Writer) error
 		for result := range passiveResults {
 			switch result.Type {
 			case subscraping.Error:
-				gologger.Warning().Msgf("Could not run source '%s': %s\n", result.Source, result.Error)
+				gologger.Warning().Msgf("Could not run source %s: %s\n", result.Source, result.Error)
 			case subscraping.Subdomain:
 				// Validate the subdomain found and remove wildcards from
 				if !strings.HasSuffix(result.Value, "."+domain) {
@@ -99,7 +106,7 @@ func (r *Runner) EnumerateSingleDomain(domain string, writers []io.Writer) error
 		for result := range resolutionPool.Results {
 			switch result.Type {
 			case resolve.Error:
-				gologger.Warning().Msgf("Could not resolve host: '%s'\n", result.Error)
+				gologger.Warning().Msgf("Could not resolve host: %s\n", result.Error)
 			case resolve.Subdomain:
 				// Add the found subdomain to a map.
 				if _, ok := foundResults[result.Host]; !ok {
@@ -127,7 +134,7 @@ func (r *Runner) EnumerateSingleDomain(domain string, writers []io.Writer) error
 			}
 		}
 		if err != nil {
-			gologger.Error().Msgf("Could not write results for '%s': %s\n", domain, err)
+			gologger.Error().Msgf("Could not write results for %s: %s\n", domain, err)
 			return err
 		}
 	}
@@ -146,7 +153,12 @@ func (r *Runner) EnumerateSingleDomain(domain string, writers []io.Writer) error
 			r.options.ResultCallback(&v)
 		}
 	}
-	gologger.Info().Msgf("Found %d subdomains for '%s' in %s\n", numberOfSubDomains, domain, duration)
+	gologger.Info().Msgf("Found %d subdomains for %s in %s\n", numberOfSubDomains, domain, duration)
+
+	if r.options.Statistics {
+		gologger.Info().Msgf("Printing source statistics for %s", domain)
+		printStatistics(r.passiveAgent.GetStatistics())
+	}
 
 	return nil
 }

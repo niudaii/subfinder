@@ -14,11 +14,13 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/projectdiscovery/fileutil"
 	"github.com/projectdiscovery/goflags"
 	"github.com/projectdiscovery/gologger"
 	"github.com/projectdiscovery/subfinder/v2/pkg/passive"
 	"github.com/projectdiscovery/subfinder/v2/pkg/resolve"
+	fileutil "github.com/projectdiscovery/utils/file"
+	logutil "github.com/projectdiscovery/utils/log"
+	updateutils "github.com/projectdiscovery/utils/update"
 )
 
 var (
@@ -41,6 +43,7 @@ type Options struct {
 	Version            bool                // Version specifies if we should just show version and exit
 	OnlyRecursive      bool                // Recursive specifies whether to use only recursive subdomain enumeration sources
 	All                bool                // All specifies whether to use all (slow) sources.
+	Statistics         bool                // Statistics specifies whether to report source statistics
 	Threads            int                 // Threads controls the number of threads to use for active enumerations
 	Timeout            int                 // Timeout is the seconds to wait for sources to respond
 	MaxEnumerationTime int                 // MaxEnumerationTime is the maximum amount of time in minutes to wait for enumeration
@@ -63,6 +66,7 @@ type Options struct {
 	matchRegexes       []*regexp.Regexp
 	filterRegexes      []*regexp.Regexp
 	ResultCallback     OnResultCallback // OnResult callback
+	DisableUpdateCheck bool             // DisableUpdateCheck disable update checking
 }
 
 // OnResultCallback (hostResult)
@@ -70,18 +74,19 @@ type OnResultCallback func(result *resolve.HostEntry)
 
 // ParseOptions parses the command line flags provided by a user
 func ParseOptions() *Options {
+	logutil.DisableDefaultLogger()
 	// Seed default random number generator
 	rand.Seed(time.Now().UnixNano())
 
 	// Migrate config to provider config
 	if fileutil.FileExists(defaultConfigLocation) && !fileutil.FileExists(defaultProviderConfigLocation) {
-		gologger.Info().Msgf("Detected old '%s' config file, trying to migrate providers to '%s'\n", defaultConfigLocation, defaultProviderConfigLocation)
+		gologger.Info().Msgf("Detected old %s config file, trying to migrate providers to %s\n", defaultConfigLocation, defaultProviderConfigLocation)
 		if err := migrateToProviderConfig(defaultConfigLocation, defaultProviderConfigLocation); err != nil {
-			gologger.Warning().Msgf("Could not migrate providers from existing config '%s' to provider config '%s': %s\n", defaultConfigLocation, defaultProviderConfigLocation, err)
+			gologger.Warning().Msgf("Could not migrate providers from existing config %s to provider config %s: %s\n", defaultConfigLocation, defaultProviderConfigLocation, err)
 		} else {
 			// cleanup the existing config file post migration
 			_ = os.Remove(defaultConfigLocation)
-			gologger.Info().Msgf("Migration successful from '%s' to '%s'.\n", defaultConfigLocation, defaultProviderConfigLocation)
+			gologger.Info().Msgf("Migration successful from %s to %s.\n", defaultConfigLocation, defaultProviderConfigLocation)
 		}
 	}
 
@@ -113,6 +118,11 @@ func ParseOptions() *Options {
 		flagSet.IntVar(&options.Threads, "t", 10, "number of concurrent goroutines for resolving (-active only)"),
 	)
 
+	flagSet.CreateGroup("update", "Update",
+		flagSet.CallbackVarP(GetUpdateCallback(), "update", "up", "update subfinder to latest version"),
+		flagSet.BoolVarP(&options.DisableUpdateCheck, "disable-update-check", "duc", false, "disable automatic subfinder update check"),
+	) 
+
 	createGroup(flagSet, "output", "Output",
 		flagSet.StringVarP(&options.OutputFile, "output", "o", "", "file to write output to"),
 		flagSet.BoolVarP(&options.JSON, "json", "oJ", false, "write output in JSONL(ines) format"),
@@ -137,6 +147,7 @@ func ParseOptions() *Options {
 		flagSet.BoolVar(&options.Verbose, "v", false, "show verbose output"),
 		flagSet.BoolVarP(&options.NoColor, "no-color", "nc", false, "disable color in output"),
 		flagSet.BoolVarP(&options.ListSources, "list-sources", "ls", false, "list all available sources"),
+		flagSet.BoolVar(&options.Statistics, "stats", false, "report source statistics"),
 	)
 
 	createGroup(flagSet, "optimization", "Optimization",
@@ -160,13 +171,13 @@ func ParseOptions() *Options {
 	options.Output = os.Stdout
 
 	// Check if stdin pipe was given
-	options.Stdin = hasStdin()
+	options.Stdin = fileutil.HasStdin()
 
 	// Read the inputs and configure the logging
 	options.configureOutput()
 
 	if options.Version {
-		gologger.Info().Msgf("Current Version: %s\n", Version)
+		gologger.Info().Msgf("Current Version: %s\n", version)
 		os.Exit(0)
 	}
 
@@ -176,13 +187,24 @@ func ParseOptions() *Options {
 		showBanner()
 	}
 
+	if !options.DisableUpdateCheck {
+		latestVersion, err := updateutils.GetVersionCheckCallback("subfinder")()
+		if err != nil {
+			if options.Verbose {
+				gologger.Error().Msgf("subfinder version check failed: %v", err.Error())
+			}
+		} else {
+			gologger.Info().Msgf("Current subfinder version %v %v", version, updateutils.GetVersionDescription(version, latestVersion))
+		}
+	}
+
 	// Check if the application loading with any provider configuration, then take it
 	// Otherwise load the default provider config
 	if fileutil.FileExists(options.ProviderConfig) {
-		gologger.Info().Msgf("Loading provider config from '%s'", options.ProviderConfig)
+		gologger.Info().Msgf("Loading provider config from %s", options.ProviderConfig)
 		options.loadProvidersFrom(options.ProviderConfig)
 	} else {
-		gologger.Info().Msgf("Loading provider config from the default location: '%s'", defaultProviderConfigLocation)
+		gologger.Info().Msgf("Loading provider config from the default location: %s", defaultProviderConfigLocation)
 		options.loadProvidersFrom(defaultProviderConfigLocation)
 	}
 	if options.ListSources {
@@ -210,7 +232,7 @@ func (options *Options) loadProvidersFrom(location string) {
 	// We skip bailing out if file doesn't exist because we'll create it
 	// at the end of options parsing from default via goflags.
 	if err := UnmarshalFrom(location); isFatalErr(err) && !errors.Is(err, os.ErrNotExist) {
-		gologger.Fatal().Msgf("Could not read providers from '%s': %s\n", location, err)
+		gologger.Fatal().Msgf("Could not read providers from %s: %s\n", location, err)
 	}
 }
 
@@ -257,22 +279,10 @@ func isFatalErr(err error) bool {
 	return err != nil && !errors.Is(err, io.EOF)
 }
 
-func hasStdin() bool {
-	stat, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-
-	isPipedFromChrDev := (stat.Mode() & os.ModeCharDevice) == 0
-	isPipedFromFIFO := (stat.Mode() & os.ModeNamedPipe) != 0
-
-	return isPipedFromChrDev || isPipedFromFIFO
-}
-
 func listSources(options *Options) {
 	gologger.Info().Msgf("Current list of available sources. [%d]\n", len(passive.AllSources))
 	gologger.Info().Msgf("Sources marked with an * need key(s) or token(s) to work.\n")
-	gologger.Info().Msgf("You can modify '%s' to configure your keys/tokens.\n\n", options.ProviderConfig)
+	gologger.Info().Msgf("You can modify %s to configure your keys/tokens.\n\n", options.ProviderConfig)
 
 	for _, source := range passive.AllSources {
 		message := "%s\n"
