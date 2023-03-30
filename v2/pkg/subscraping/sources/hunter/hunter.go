@@ -91,7 +91,7 @@ func (s *Source) Run(ctx context.Context, domain string, session *subscraping.Se
 				}
 			}
 			pages = int(response.Data.Total/100) + 1
-			time.Sleep(2 * time.Second)
+			time.Sleep(3 * time.Second)
 		}
 	}()
 

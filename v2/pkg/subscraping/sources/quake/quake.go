@@ -60,7 +60,7 @@ func (s *Source) Run(ctx context.Context, domain string, session *subscraping.Se
 
 		// quake api doc https://quake.360.cn/quake/#/help
 		var pages = 1
-		var pageSize = 500
+		var pageSize = 100
 		for currentPage := 1; currentPage <= pages; currentPage++ {
 			gologger.Debug().Msgf("Querying %s for %s, currentPage:%d allPage:%d", s.Name(), domain, currentPage, pages)
 			var requestBody = []byte(fmt.Sprintf(`{"query":"domain: %s", "start":%d, "size":%d,"ignore_cache": false,
@@ -105,7 +105,7 @@ func (s *Source) Run(ctx context.Context, domain string, session *subscraping.Se
 				}
 				pages = int(response.Meta.Pagination.Total/pageSize) + 1
 			}
-			time.Sleep(2 * time.Second)
+			time.Sleep(3 * time.Second)
 
 		}
 	}()
